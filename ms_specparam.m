@@ -30,7 +30,7 @@ TF = 10.^TF; % function takes PSD measured in units of power
 [fs, fg] = ms_specparam(TF,Freqs, opt, 1);
 
 
-
+%% Main algorithm
 function [fs, fg] = ms_specparam(TF, Freqs, opt, hOT)
     % Find all frequency values within user limits
     fMask = (round(Freqs.*10)./10 >= opt.freq_range(1)) & (round(Freqs.*10)./10 <= opt.freq_range(2)) & ~mod(sum(abs(round(Freqs.*10)./10-[1;2;3].*str2double(opt.power_line)) >= 2),3);
