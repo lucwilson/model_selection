@@ -11,4 +11,6 @@ Simulated power spectra (and their constituent parameters) and noise matrix used
 
 Code used for analyzing the empirical data in the preprint (Cam-CAN) can be found in regression_analyses_plotting_utils.rmd.
 
+Empirical metadata and results in the preprint (Cam-CAN), where permissible to share, can be found in /empirical_data.
+
 Please contact the authors of this package for any questions and suggestions.
