@@ -1,0 +1,1257 @@
+---
+  title: "ms-specparam regression and plotting code"
+---
+  
+  Read in data from tables and organize it to explore in regressions 
+(e.g., See how it relates to age)
+
+Note variables names represent the following algorithms:
+Van == default specparam
+BIC == model-selection specparam
+SB == conservative specparam
+
+CSVs contain 606 rows and either 79, 148, or 888 columns. 
+79 columns == averaged data across ROIs, by frequency
+148 columns == data (averaged across frequencies, if applicable), by ROI
+888 columns == data by ROI (space for up to 6 data points in each ROI)
+
+See paper for details on relevant analyses.
+
+NB: Paired data by participant for Cam-CAN is not included in the Github, but the associated code for analyzing results is provided in the interest of comprehensiveness. Raw MEG data can be obtained directly from the maintainers of Cam-CAN.
+
+Link: https://camcan-archive.mrc-cbu.cam.ac.uk/dataaccess/
+References (DOI): 10.1016/j.neuroimage.2015.09.018, 10.1186/s12883-014-0204-1
+
+```{r cleaning data and demographics}
+library(ggplot2)
+library(dplyr)
+library(BayesFactor)
+library(ggseg)
+library(ggsegDesterieux)
+library(colorspace)
+
+cbbPalette= c("#4f89e0", "#f5ec6c",'#156605',"#76D7C4","#268236", '#4d3d87','#593d80', '#3b49e3')
+
+# pool together demographics from all parts
+demo=read.csv('~/Documents/CAMCAN_outputs/CAMCAN_Analysis/standard_data.csv')
+demo2=read.csv('~fulldemo_fromCAMCAN_test.csv')
+demo$CCID=paste('sub',demo$CCID, sep = '_')
+ids=read.csv('~/Documents/CAMCAN_outputs/CAMCAN_Analysis/subject_codes.csv')
+index=demo$CCID %in% ids$Ids
+demo=demo[index,]
+
+demo$Group[demo$Age>=18 & demo$Age <45]= "young adult"
+demo$Group[demo$Age>=45 & demo$Age <65]= "adult"
+demo$Group[demo$Age>=65 & demo$Age <90]= "older adult"
+
+full_demo=read.csv('~approved_data.csv')
+full_demo$CCID=paste('sub',full_demo$CCID, sep = '_')
+index=full_demo$CCID %in% ids$Ids
+full_demo=full_demo[index,]
+
+# read in csv of slopes for each hyperparameter setting
+exponent_Van= read.csv('~aperiodic_exponent_Van.csv', header = FALSE)
+exponent_BIC= read.csv('~aperiodic_exponent_BIC.csv', header = FALSE)
+exponent_SB= read.csv('~aperiodic_exponent_SB.csv', header = FALSE)
+
+# read in csv of offset
+offset_Van= read.csv('~aperiodic_offset_Van.csv', header = FALSE)
+offset_BIC= read.csv('~aperiodic_offset_BIC.csv', header = FALSE)
+offset_SB= read.csv('~aperiodic_offset_SB.csv', header = FALSE)
+
+# avg MSE of spectral model fit
+MSE_Van= read.csv('~fit_mse_Van.csv', header = FALSE)
+MSE_BIC= read.csv('~fit_mse_BIC.csv', header = FALSE)
+BF_BIC= read.csv('~BF_BIC.csv', header = FALSE)
+
+peak_cf_Van= read.csv('~Peak_center_freq_Van.csv', header = FALSE)
+peak_cf_BIC= read.csv('~Peak_center_freq_BIC.csv', header = FALSE)
+
+peak_amp_Van= read.csv('~Amplitude_freq_Van.csv', header = FALSE)
+peak_amp_BIC= read.csv('~Amplitude_freq_BIC.csv', header = FALSE)
+
+peak_std_Van= read.csv('~Std_freq_Van.csv', header = FALSE)
+peak_std_BIC= read.csv('~Std_freq_BIC.csv', header = FALSE)
+
+# organized atlas info (summary of ROI)
+atlas= read.csv('~Destrieux_atlas.csv')
+
+
+
+```
+
+MSE is significantly lower in BIC FOOOF but this does not interact with age
+
+
+```{r plot model fit compare groups BF brain map}
+
+someData3= tidyr::tibble(atlas$region, colMeans(MSE_Van), atlas$hemi, 'Vanilla')
+someData2= tidyr::tibble(atlas$region, colMeans(MSE_BIC), atlas$hemi, 'BIC')
+colnames(someData2)= c('region', 'MSE', 'hemi', 'algorithm')
+colnames(someData3)= c('region', 'MSE', 'hemi', 'algorithm')
+someData3=rbind(someData3, someData2)
+someData3= someData3[!is.na(someData3$algorithm),]
+someData3$algorithm= factor(someData3$algorithm, levels = c(NA,'Vanilla', 'BIC'))
+someData3$region= factor(someData3$region)
+
+someData3 %>%
+  group_by(algorithm) %>% 
+  brain_join(desterieux) %>% 
+  reposition_brain(hemi ~ side) %>% 
+  ggplot(aes(fill =MSE)) + 
+  geom_sf(show.legend = TRUE) + 
+  facet_wrap( ~ algorithm) +  scale_fill_continuous_sequential(palette= 'Sunset', rev= FALSE) +  scale_color_continuous_sequential(palette= 'Sunset', rev= FALSE) +
+  theme_void() + scale_color_manual('white')
+
+ggsave('~Brain_map_MSE_compare.pdf', device = "pdf")
+
+
+
+MSE_SB= read.csv('~fit_mse_SB.csv', header = FALSE)
+
+someData2= tidyr::tibble(atlas$region, colMeans(MSE_SB), atlas$hemi, 'SB')
+colnames(someData2)= c('region', 'MSE', 'hemi', 'algorithm')
+someData3=rbind(someData3, someData2)
+someData3= someData3[!is.na(someData3$algorithm),]
+someData3$algorithm= factor(someData3$algorithm, levels = c(NA,'Vanilla', 'SB','BIC'))
+someData3$region= factor(someData3$region)
+
+someData3 %>%
+  group_by(algorithm) %>% 
+  brain_join(desterieux) %>% 
+  reposition_brain(hemi ~ side) %>% 
+  ggplot(aes(fill =MSE)) + 
+  geom_sf(show.legend = TRUE) + 
+  facet_wrap( ~ algorithm) +  scale_fill_continuous_sequential(palette= 'Sunset', rev= FALSE) +  scale_color_continuous_sequential(palette= 'Sunset', rev= FALSE) +
+  theme_void() + scale_color_manual('white')
+
+ggsave('~Brain_map_MSE_compare_conservative.pdf', device = "pdf")
+
+
+
+# box plots of MSE model fit
+data4plot= data.frame(MSE= c(rowMeans(MSE_Van),rowMeans(MSE_SB), rowMeans(MSE_BIC)),
+                      algorithm= factor(x = rep(c('liberal','conservative', 'ms-'), each=606), levels = c('liberal','conservative', 'ms-')) , age= factor(demo$Group, c('young adult', 'adult', 'older adult')), age_raw= demo$Age)
+
+
+ggplot(data4plot, aes(age, MSE, fill=algorithm)) + 
+  ggdist::stat_halfeye(adjust = .5, width = .5, .width = 0, justification = -.5, alpha=0.5, point_alpha= 0) + 
+  geom_boxplot(width = .3, outlier.shape = NA, outlier.size = 0.001, outlier.alpha = 0.0001, colour= '#888888') + ggpubr::theme_classic2() + scale_fill_manual(values=cbbPalette) + coord_cartesian(ylim = c(0, 0.015))
+
+ggsave('~boxplot_MSE_compare_pergroup_with_conservative.pdf', device = "pdf")
+
+ggplot(data4plot, aes(algorithm, MSE, fill=algorithm)) + 
+  ggdist::stat_halfeye(adjust = .5, width = .5, .width = 0, justification = -.5, alpha=0.5, point_alpha= 0) + 
+  geom_boxplot(width = .2, outlier.shape = NA, outlier.size = 0.001, colour= '#888888') + ggpubr::theme_classic2() + scale_fill_manual(values=cbbPalette) + coord_cartesian(ylim = c(0, 0.015))
+
+ggsave('~boxplot_MSE_compare_with_conservative.pdf', device = "pdf")
+
+
+RVAideMemoire::perm.t.test(rowMeans(MSE_BIC),rowMeans(MSE_Van), nperm=1000)
+
+RVAideMemoire::perm.t.test(data4plot$MSE[data4plot$algorithm=='ms-'],data4plot$MSE[data4plot$algorithm=='liberal'], nperm=1000, paired=TRUE)
+
+#t = -51.169, p-value = 0.001998
+
+RVAideMemoire::perm.t.test(data4plot$MSE[data4plot$algorithm=='ms-'],data4plot$MSE[data4plot$algorithm=='conservative'], nperm=1000, paired=TRUE)
+
+RVAideMemoire::perm.t.test(rowMeans(MSE_BIC),rowMeans(MSE_SB), nperm=1000, paired=TRUE)
+
+# t = -48.821, p-value = 0.001998
+
+
+# plot Bayes factor for periodic activity 
+someData3= data.frame(region= atlas$region, BF= log10(colMeans(BF_BIC)), hemi= atlas$hemi, algorithm='BIC')
+colnames(someData3)= c('region', 'BF', 'hemi', 'algorithm')
+
+someData3$BF[someData3$BF >1] =1
+someData3$BF[someData3$BF < -25] =-25
+
+someData3= na.omit(someData3)
+someData3= someData3[!is.na(someData3$region),]
+ggplot(someData3) +
+  geom_brain(atlas = desterieux, 
+             position = position_brain(hemi ~ side),
+             aes(fill = BF)) +  scale_fill_continuous_sequential(palette= 'Terrain', rev= TRUE, limits= c(-25,1)) +  scale_color_continuous_sequential(palette= 'Terrain', rev= TRUE) + theme_void() + scale_color_manual('white')
+
+ggsave('~Brain_map_BF.pdf', device = "pdf")
+
+```
+
+
+
+
+```{r plot frequency wise MSE per hyperparameter setting}
+
+fmse_Van=read.csv('~fmse_mean_Van.csv', header = FALSE)
+fmse_BIC=read.csv('~fmse_mean_BIC.csv', header = FALSE)
+fmse_SB=read.csv('~fmse_mean_SB.csv', header = FALSE)
+
+stderror <- function(x) sd(x)/sqrt(length(x))
+
+data4plot= data.frame(fmse= c(colMeans(fmse_Van),colMeans(fmse_SB),colMeans(fmse_BIC)), sd_fmse= c(1.96*apply(fmse_Van, 2, stderror),1.96*apply(fmse_SB, 2, stderror),1.96*apply(fmse_BIC, 2, stderror)),
+                      algorithm= factor(x = rep(c('Vanilla','SB', 'BIC'), each=79), levels = c('Vanilla','SB', 'BIC')), freq=  seq(1,40,0.5))
+
+
+ggplot(data4plot, aes(x= freq, y = fmse, fill= algorithm,colour= algorithm, ymin=fmse-sd_fmse, ymax=fmse+sd_fmse)) + geom_ribbon(alpha=0.5, colour= NA) + geom_line() + ggpubr::theme_classic2() + coord_cartesian(xlim = c(1, 40) ) + scale_fill_manual(values=cbbPalette) + scale_color_manual(values=cbbPalette)
+
+ggsave('~FMSE_plot.pdf', device = "pdf")
+
+
+```
+
+```{r plot peak count per ROI}
+
+
+peaks_count_total_Van= read.csv('~peak_count_per_ROI_Van.csv', header = FALSE)
+
+peaks_count_total_BIC= read.csv('~peak_count_per_ROI_BIC.csv', header = FALSE)
+
+
+someData3= tidyr::tibble(atlas$region, colMeans(peaks_count_total_Van), atlas$hemi, 'Vanilla')
+someData2= tidyr::tibble(atlas$region, colMeans(peaks_count_total_BIC), atlas$hemi, 'BIC')
+colnames(someData2)= c('region', 'peak_count', 'hemi', 'algorithm')
+colnames(someData3)= c('region', 'peak_count', 'hemi', 'algorithm')
+someData3=rbind(someData3, someData2)
+someData3= someData3[!is.na(someData3$algorithm),]
+someData3$algorithm= factor(someData3$algorithm, levels = c(NA,'Vanilla', 'BIC'))
+someData3$region= factor(someData3$region)
+
+someData3 %>%
+  group_by(algorithm) %>% 
+  brain_join(desterieux) %>% 
+  reposition_brain(hemi ~ side) %>% 
+  ggplot(aes(fill =peak_count)) + 
+  geom_sf(show.legend = TRUE) + 
+  facet_wrap( ~ algorithm) +  scale_fill_continuous_sequential(palette= 'Sunset', rev= FALSE) +  scale_color_continuous_sequential(palette= 'Sunset', rev= FALSE) +
+  theme_void() + scale_color_manual('white')
+
+ggsave('~Brain_map_number_of_peaks_fit.pdf', device = "pdf")
+
+# plot topo of difference in peak count
+data4plot=  someData3[1:148,]
+data4plot$peak_count = someData3$peak_count[someData3$algorithm=='BIC']- someData3$peak_count[someData3$algorithm=='Vanilla']
+
+data4plot %>%
+  group_by(algorithm) %>% 
+  brain_join(desterieux) %>% 
+  reposition_brain(hemi ~ side) %>% 
+  ggplot(aes(fill =peak_count)) + 
+  geom_sf(show.legend = TRUE) + 
+  facet_wrap( ~ algorithm) +  scale_fill_continuous_sequential(palette= 'Sunset', rev= FALSE) +  scale_color_continuous_sequential(palette= 'Sunset', rev= FALSE) +
+  theme_void() + scale_color_manual('white')
+
+ggsave('~Brain_map_number_of_peaks_fit_difference_between_alogrithms.pdf', device = "pdf")
+
+
+
+data4plot= data.frame(peak_count= c(rowMeans(peaks_count_total_Van),rowMeans(peaks_count_total_BIC)),
+                      algorithm= factor(x = rep(c('Vanilla', 'BIC'), each=606), levels = c('Vanilla', 'BIC')) , age= factor(demo$Group, c('young adult', 'adult', 'older adult')), age_raw= demo$Age)
+
+ggplot(data4plot, aes(age, peak_count, fill=algorithm)) + 
+  ggdist::stat_halfeye(adjust = .5, width = .5, .width = 0, justification = -.5, alpha=0.5, point_alpha=0) + 
+  geom_boxplot(width = .3, outlier.shape = NA, colour= '#888888') + ggpubr::theme_classic2() + scale_fill_manual(values=cbbPalette)
+
+ggsave('~boxplot_peak_count_compare_pergroup.pdf', device = "pdf")
+
+ggplot(data4plot, aes(algorithm, peak_count, fill=algorithm)) + 
+  ggdist::stat_halfeye(adjust = .5, width = .5, .width = 0, justification = -.5, alpha=0.5, point_alpha=0) + 
+  geom_boxplot(width = .2, outlier.shape = NA, colour= '#888888') + ggpubr::theme_classic2() + scale_fill_manual(values=cbbPalette)
+
+ggsave('~boxplot_peak_count_compare.pdf', device = "pdf")
+
+
+
+RVAideMemoire::perm.t.test(rowMeans(peaks_count_total_BIC),rowMeans(peaks_count_total_Van), nperm=1000, paired=TRUE)
+
+# -58.263, p-value = 0.001998
+
+
+```
+
+
+
+
+The estimate of BIC vs Vanilla exponent is not sig diff but they are diff by small amount
+
+age effect on exponent there and stronger in BIC, but no sig interaction effect
+Should explore this per ROI
+
+age effect on offset there and main effect of algorithm, but no interaction
+Test this per ROI
+
+```{r plot exponents and offset }
+
+
+someData3= tidyr::tibble(atlas$region, colMeans(exponent_Van), atlas$hemi, 'Vanilla')
+someData2= tidyr::tibble(atlas$region, colMeans(exponent_BIC), atlas$hemi, 'BIC')
+colnames(someData2)= c('region', 'exponent', 'hemi', 'algorithm')
+colnames(someData3)= c('region', 'exponent', 'hemi', 'algorithm')
+someData3=rbind(someData3, someData2)
+someData3= someData3[!is.na(someData3$algorithm),]
+someData3$algorithm= factor(someData3$algorithm, levels = c(NA,'Vanilla', 'BIC'))
+someData3$region= factor(someData3$region)
+
+someData3 %>%
+  group_by(algorithm) %>% 
+  brain_join(desterieux) %>% 
+  reposition_brain(hemi ~ side) %>% 
+  ggplot(aes(fill =exponent)) + 
+  geom_sf(show.legend = TRUE) + 
+  facet_wrap( ~ algorithm) +  scale_fill_continuous_sequential(palette= 'Sunset', rev= FALSE) +  scale_color_continuous_sequential(palette= 'Sunset', rev= FALSE) +
+  theme_void() + scale_color_manual('white')
+
+ggsave('~Brain_map_exponent_compare.pdf', device = "pdf")
+
+
+# plot topo difference between slope estimates 
+data4plot=  someData3[1:148,]
+data4plot$exponent = someData3$exponent[someData3$algorithm=='BIC']- someData3$exponent[someData3$algorithm=='Vanilla']
+
+data4plot %>%
+  group_by(algorithm) %>% 
+  brain_join(desterieux) %>% 
+  reposition_brain(hemi ~ side) %>% 
+  ggplot(aes(fill =exponent)) + 
+  geom_sf(show.legend = TRUE) + 
+  facet_wrap( ~ algorithm) + scale_fill_gradient2(low = "#4f89e0", mid = "#FCF7F4", high = "#156605", midpoint = 0.0, limits= c(-0.02, 0.02)) +    scale_fill_gradient2(low = "#4f89e0", mid = "#FCF7F4", high = "#156605", midpoint = 0.0, limits= c(-0.02, 0.02)) +
+  theme_void() + scale_color_manual('white')
+
+ggsave('~Brain_map_exponent_difference_between_alogrithms.pdf', device = "pdf")
+
+
+
+#offset ##
+someData3= tidyr::tibble(atlas$region, colMeans(offset_Van), atlas$hemi, 'Vanilla')
+someData2= tidyr::tibble(atlas$region, colMeans(offset_BIC), atlas$hemi, 'BIC')
+colnames(someData2)= c('region', 'offset', 'hemi', 'algorithm')
+colnames(someData3)= c('region', 'offset', 'hemi', 'algorithm')
+someData3=rbind(someData3, someData2)
+someData3= someData3[!is.na(someData3$algorithm),]
+someData3$algorithm= factor(someData3$algorithm, levels = c(NA,'Vanilla', 'BIC'))
+someData3$region= factor(someData3$region)
+
+someData3 %>%
+  group_by(algorithm) %>% 
+  brain_join(desterieux) %>% 
+  reposition_brain(hemi ~ side) %>% 
+  ggplot(aes(fill =offset)) + 
+  geom_sf(show.legend = TRUE) + 
+  facet_wrap( ~ algorithm) +  scale_fill_continuous_sequential(palette= 'Sunset', rev= FALSE) +  scale_color_continuous_sequential(palette= 'Sunset', rev= FALSE) +
+  theme_void() + scale_color_manual('white')
+
+ggsave('~Brain_map_offset_compare.pdf', device = "pdf")
+
+
+data4plot=  someData3[1:148,]
+data4plot$offset = someData3$offset[someData3$algorithm=='BIC']- someData3$offset[someData3$algorithm=='Vanilla']
+
+data4plot %>%
+  group_by(algorithm) %>% 
+  brain_join(desterieux) %>% 
+  reposition_brain(hemi ~ side) %>% 
+  ggplot(aes(fill =offset)) + 
+  geom_sf(show.legend = TRUE) + 
+  facet_wrap( ~ algorithm) + scale_fill_gradient2(low = "#4f89e0", mid = "#FCF7F4", high = "#156605", midpoint = 0.0, limits= c(-0.1, 0.01)) +    scale_fill_gradient2(low = "#4f89e0", mid = "#FCF7F4", high = "#156605", midpoint = 0.0, limits= c(-0.1, 0.1)) +
+  theme_void() + scale_color_manual('white')
+
+ggsave('~Brain_map_offset_difference_between_alogrithms.pdf', device = "pdf")
+
+
+
+
+# Strawberry offset plot ##
+exponent_SB= read.csv('~aperiodic_exponent_SB.csv', header = FALSE)
+
+someData3= tidyr::tibble(atlas$region, colMeans(exponent_Van), atlas$hemi, 'Vanilla')
+someData2= tidyr::tibble(atlas$region, colMeans(exponent_BIC), atlas$hemi, 'BIC')
+someData1= tidyr::tibble(atlas$region, colMeans(exponent_SB), atlas$hemi, 'SB')
+colnames(someData2)= c('region', 'exponent', 'hemi', 'algorithm')
+colnames(someData3)= c('region', 'exponent', 'hemi', 'algorithm')
+colnames(someData1)= c('region', 'exponent', 'hemi', 'algorithm')
+someData3=rbind(someData3, someData2, someData1)
+someData3= someData3[!is.na(someData3$algorithm),]
+someData3$algorithm= factor(someData3$algorithm, levels = c(NA,'Vanilla', 'SB','BIC'))
+someData3$region= factor(someData3$region)
+
+
+someData3 %>%
+  group_by(algorithm) %>% 
+  brain_join(desterieux) %>% 
+  reposition_brain(hemi ~ side) %>% 
+  ggplot(aes(fill =exponent)) + 
+  geom_sf(show.legend = TRUE) + 
+  facet_wrap( ~ algorithm) +  scale_fill_continuous_sequential(palette= 'Sunset', rev= FALSE) +  scale_color_continuous_sequential(palette= 'Sunset', rev= FALSE) +
+  theme_void() + scale_color_manual('white')
+
+ggsave('~Brain_map_exponent_compare_withSTRAWBERRY.pdf', device = "pdf")
+
+
+# BIC vs conservative 
+data4plot=  someData3[1:148,]
+data4plot$exponent = someData3$exponent[someData3$algorithm=='BIC']- someData3$exponent[someData3$algorithm=='SB']
+
+data4plot %>%
+  group_by(algorithm) %>% 
+  brain_join(desterieux) %>% 
+  reposition_brain(hemi ~ side) %>% 
+  ggplot(aes(fill =exponent)) + 
+  geom_sf(show.legend = TRUE) + 
+  facet_wrap( ~ algorithm) +  scale_fill_continuous_diverging(palette= 'Purple-Green', rev= FALSE, limits= c(-0.01, 0.06)) +  scale_color_continuous_diverging(palette= 'Purple-Green', rev= FALSE, limits= c(-0.01, 0.06)) +
+  theme_void() + scale_color_manual('white')
+
+ggsave('~Brain_map_exponent_difference_between_alogrithms_SB.df', device = "pdf")
+
+
+
+# offset 
+offset_SB= read.csv('~aperiodic_offset_SB.csv',header = FALSE)
+
+someData3= tidyr::tibble(atlas$region, colMeans(offset_Van), atlas$hemi, 'Vanilla')
+someData2= tidyr::tibble(atlas$region, colMeans(offset_BIC), atlas$hemi, 'BIC')
+someData1= tidyr::tibble(atlas$region, colMeans(offset_SB), atlas$hemi, 'SB')
+colnames(someData2)= c('region', 'exponent', 'hemi', 'algorithm')
+colnames(someData3)= c('region', 'exponent', 'hemi', 'algorithm')
+colnames(someData1)= c('region', 'exponent', 'hemi', 'algorithm')
+someData3=rbind(someData3, someData2, someData1)
+someData3= someData3[!is.na(someData3$algorithm),]
+someData3$algorithm= factor(someData3$algorithm, levels = c(NA,'Vanilla', 'SB','BIC'))
+someData3$region= factor(someData3$region)
+
+someData3 %>%
+  group_by(algorithm) %>% 
+  brain_join(desterieux) %>% 
+  reposition_brain(hemi ~ side) %>% 
+  ggplot(aes(fill =exponent)) + 
+  geom_sf(show.legend = TRUE) + 
+  facet_wrap( ~ algorithm) +  scale_fill_continuous_sequential(palette= 'Sunset', rev= FALSE) +  scale_color_continuous_sequential(palette= 'Sunset', rev= FALSE) +
+  theme_void() + scale_color_manual('white') 
+
+ggsave('~Brain_map_offset_compare.pdf', device = "pdf")
+
+
+
+data4plot=  someData3[1:148,]
+data4plot$exponent = someData3$exponent[someData3$algorithm=='BIC']- someData3$exponent[someData3$algorithm=='SB']
+
+data4plot %>%
+  group_by(algorithm) %>% 
+  brain_join(desterieux) %>% 
+  reposition_brain(hemi ~ side) %>% 
+  ggplot(aes(fill =exponent)) + 
+  geom_sf(show.legend = TRUE) + 
+  facet_wrap( ~ algorithm) +  scale_fill_continuous_diverging(palette= 'Purple-Green', rev= FALSE, limits= c(-0.09, 0.01)) +  scale_color_continuous_diverging(palette= 'Purple-Green', rev= FALSE, limits= c(-0.09, 0.01)) +
+  theme_void() + scale_color_manual('white')
+
+ggsave('~Brain_map_offset_difference_between_alogrithms_SB.df', device = "pdf")
+
+
+```
+
+```{r run stats on exponents, offset, MSE, peak count }
+
+# run Heirch regression model to test interaction effect on slope
+# repeat for two main comparisons BIC vs liberal
+# and BIC vs conservative
+data4plot=data.frame(exponent=c(stack(exponent_Van)[,1], stack(exponent_BIC)[,1]), 
+           algorithm= rep(c('Vanilla', 'BIC'), each=606*148),
+           age= demo$Group, age_raw= demo$Age, subID= demo$CCID)
+
+data4plot$algorithm= factor(data4plot$algorithm, levels = c('Vanilla', 'BIC'))
+data4plot$age= factor(data4plot$age, levels = c('young adult', 'adult', 'older adult'))
+
+
+data4plot=data.frame(exponent=c(rowMeans(exponent_Van), rowMeans(exponent_BIC)), 
+           algorithm= rep(c('Vanilla', 'BIC'), each=606),
+           age= demo$Group, age_raw= demo$Age, subID= demo$CCID)
+
+data4plot$algorithm= factor(data4plot$algorithm, levels = c('Vanilla', 'BIC'))
+data4plot$age= factor(data4plot$age, levels = c('young adult', 'adult', 'older adult'))
+
+data4plot$exponent= scale(data4plot$exponent)
+data4plot$age_raw= scale(data4plot$age_raw)
+lm0=lme4::lmer(exponent ~(1 | subID), data4plot)
+lm1=lme4::lmer(exponent ~age_raw + (1 | subID), data4plot)
+lm11=lme4::lmer(exponent ~algorithm + (1 | subID), data4plot)
+lm2=lme4::lmer(exponent ~algorithm + age_raw + (1 | subID), data4plot)
+lm3=lme4::lmer(exponent ~algorithm *age_raw + (1 | subID), data4plot)
+
+anova(lm0,lm1,lm2,lm3)
+sjPlot::tab_model(lm3)
+
+exp((BIC(lm2) - BIC(lm3))/2)
+exp((BIC(lm0) - BIC(lm1))/2)
+exp((BIC(lm0) - BIC(lm11))/2)
+
+
+
+data4plot=data.frame(exponent=c(rowMeans(exponent_SB), rowMeans(exponent_BIC)), 
+           algorithm= rep(c('SB', 'BIC'), each=606),
+           age= demo$Group, age_raw= demo$Age, subID= demo$CCID)
+
+data4plot$algorithm= factor(data4plot$algorithm, levels = c('SB', 'BIC'))
+data4plot$age= factor(data4plot$age, levels = c('young adult', 'adult', 'older adult'))
+
+data4plot$exponent= scale(data4plot$exponent)
+data4plot$age_raw= scale(data4plot$age_raw)
+lm0=lme4::lmer(exponent ~(1 | subID), data4plot)
+lm1=lme4::lmer(exponent ~age_raw + (1 | subID), data4plot)
+lm11=lme4::lmer(exponent ~algorithm + (1 | subID), data4plot)
+lm2=lme4::lmer(exponent ~algorithm + age_raw + (1 | subID), data4plot)
+lm3=lme4::lmer(exponent ~algorithm *age_raw + (1 | subID), data4plot)
+
+anova(lm0,lm1,lm2,lm3)
+sjPlot::tab_model(lm3)
+
+exp((BIC(lm2) - BIC(lm3))/2)
+exp((BIC(lm0) - BIC(lm1))/2)
+exp((BIC(lm0) - BIC(lm11))/2)
+
+
+## offset 
+
+
+data4plot=data.frame(offset=c(rowMeans(offset_Van), rowMeans(offset_BIC)), 
+           algorithm= rep(c('Vanilla', 'BIC'), each=606),
+           age= demo$Group, age_raw= demo$Age, subID= demo$CCID)
+
+data4plot$algorithm= factor(data4plot$algorithm, levels = c('Vanilla', 'BIC'))
+data4plot$age= factor(data4plot$age, levels = c('young adult', 'adult', 'older adult'))
+
+
+data4plot$offset= scale(data4plot$offset)
+data4plot$age_raw= scale(data4plot$age_raw)
+lm0=lme4::lmer(offset ~(1 | subID), data4plot)
+lm1=lme4::lmer(offset ~age_raw + (1 | subID), data4plot)
+lm11=lme4::lmer(offset ~algorithm + (1 | subID), data4plot)
+lm2=lme4::lmer(offset ~algorithm + age_raw + (1 | subID), data4plot)
+lm3=lme4::lmer(offset ~algorithm *age_raw + (1 | subID), data4plot)
+
+anova(lm0,lm1,lm2,lm3)
+sjPlot::tab_model(lm3)
+
+exp((BIC(lm2) - BIC(lm3))/2)
+exp((BIC(lm0) - BIC(lm1))/2)
+exp((BIC(lm0) - BIC(lm11))/2)
+
+
+
+data4plot=data.frame(offset=c(rowMeans(offset_SB), rowMeans(offset_BIC)), 
+           algorithm= rep(c('SB', 'BIC'), each=606),
+           age= demo$Group, age_raw= demo$Age, subID= demo$CCID)
+
+data4plot$algorithm= factor(data4plot$algorithm, levels = c('SB', 'BIC'))
+data4plot$age= factor(data4plot$age, levels = c('young adult', 'adult', 'older adult'))
+
+
+
+data4plot$offset= scale(data4plot$offset)
+data4plot$age_raw= scale(data4plot$age_raw)
+lm0=lme4::lmer(offset ~(1 | subID), data4plot)
+lm1=lme4::lmer(offset ~age_raw + (1 | subID), data4plot)
+lm11=lme4::lmer(offset ~algorithm + (1 | subID), data4plot)
+lm2=lme4::lmer(offset ~algorithm + age_raw + (1 | subID), data4plot)
+lm3=lme4::lmer(offset ~algorithm *age_raw + (1 | subID), data4plot)
+
+anova(lm0,lm1,lm2,lm3)
+sjPlot::tab_model(lm3)
+
+exp((BIC(lm2) - BIC(lm3))/2)
+exp((BIC(lm0) - BIC(lm1))/2)
+exp((BIC(lm0) - BIC(lm11))/2)
+
+
+
+```
+
+
+
+```{r make interaction aperiodic effect plot}
+
+data4plot= data.frame(MSE= c(rowMeans(exponent_Van),rowMeans(exponent_SB), rowMeans(exponent_BIC)),
+                      algorithm= factor(x = rep(c('Vanilla', 'SB','BIC'), each=606), levels = c('Vanilla','SB', 'BIC')) , age= factor(demo$Group, c('young adult', 'adult', 'older adult')), age_raw= demo$Age)
+
+ggplot(data4plot, aes(x=data4plot$age_raw , y = data4plot$MSE, fill=data4plot$algorithm, colour=data4plot$algorithm)) + 
+  geom_point(aes(x=data4plot$age_raw , y = data4plot$MSE, alpha =0.5)) +
+  stat_smooth(aes(x=data4plot$age_raw , y = data4plot$MSE),method = "lm") +  scale_colour_manual(values=cbbPalette[1:3]) +
+  scale_fill_manual(values=cbbPalette[1:3])  + ggpubr::theme_classic2() +   xlab("age") + ylab("exponent (units)")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"), legend.position = "none") 
+
+ggsave('~Regression_exponent_with_age_interaction_all_models.pdf', device = "pdf", width = 5, height = 5)
+
+
+data4plot= data.frame(MSE= c(rowMeans(exponent_SB), rowMeans(exponent_BIC)),
+                      algorithm= factor(x = rep(c( 'SB','BIC'), each=606), levels = c('SB', 'BIC')) , age= factor(demo$Group, c('young adult', 'adult', 'older adult')), age_raw= demo$Age)
+
+
+ggplot(data4plot, aes(x=data4plot$age_raw, y = data4plot$MSE, fill=data4plot$algorithm, colour=data4plot$algorithm)) + 
+  geom_point( aes(x=data4plot$age_raw , y = data4plot$MSE, alpha =0.5)) + geom_smooth(method = "lm", formula = y ~ x, fullrange = T) +  scale_colour_manual(values=cbbPalette[2:3]) +
+  scale_fill_manual(values=cbbPalette[2:3])  + ggpubr::theme_classic2() +   xlab("age") + ylab("exponent (units)")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"), legend.position = "none") 
+
+ggsave('~Regression_exponent_with_age_interaction_all_models.pdf', device = "pdf", width = 5, height = 5)
+
+
+
+
+data4plot= data.frame(MSE= c(rowMeans(offset_Van),rowMeans(offset_SB), rowMeans(offset_BIC)),
+                      algorithm= factor(x = rep(c('Vanilla', 'SB','BIC'), each=606), levels = c('Vanilla','SB', 'BIC')) , age= factor(demo$Group, c('young adult', 'adult', 'older adult')), age_raw= demo$Age)
+
+ggplot(data4plot, aes(x=data4plot$age_raw , y = data4plot$MSE, fill=data4plot$algorithm, colour=data4plot$algorithm)) + 
+  geom_point(aes(x=data4plot$age_raw , y = data4plot$MSE, alpha =0.5)) +
+  stat_smooth(aes(x=data4plot$age_raw , y = data4plot$MSE),method = "lm") +  scale_colour_manual(values=cbbPalette[1:3]) +
+  scale_fill_manual(values=cbbPalette[1:3])  + ggpubr::theme_classic2() +   xlab("age") + ylab("offset (units)")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"), legend.position = "none") 
+
+ggsave('~Regression_offset_with_age_interaction_all_models.pdf', device = "pdf", width = 5, height = 5)
+
+
+data4plot= data.frame(MSE= c(rowMeans(offset_SB), rowMeans(offset_BIC)),
+                      algorithm= factor(x = rep(c( 'SB','BIC'), each=606), levels = c('SB', 'BIC')) , age= factor(demo$Group, c('young adult', 'adult', 'older adult')), age_raw= demo$Age)
+
+
+ggplot(data4plot, aes(x=data4plot$age_raw, y = data4plot$MSE, fill=data4plot$algorithm, colour=data4plot$algorithm)) + 
+  geom_point(aes(x=data4plot$age_raw , y = data4plot$MSE, alpha =0.5)) + geom_smooth(method = "lm", formula = y ~ x, fullrange = T) +  scale_colour_manual(values=cbbPalette[2:3]) +
+  scale_fill_manual(values=cbbPalette[2:3])  + ggpubr::theme_classic2() +   xlab("age") + ylab("offset (units)")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"), legend.position = "none") 
+
+ggsave('~Regression_offset_with_age_interaction_all_models.pdf', device = "pdf", width = 5, height = 5)
+
+
+```
+
+
+
+
+
+
+
+
+
+```{r plot peak paramters (histograms and stats) }
+
+cbbPalette= c("#4f89e0", "#f5ec6c",'#156605',"#76D7C4","#268236", '#4d3d87','#593d80', '#3b49e3')
+
+
+data4plot=data.frame(center_freq=c(stack(peak_cf_Van)[,1], stack(peak_cf_BIC)[,1]), 
+           algorithm= rep(c('Vanilla', 'BIC'), each=606*888),
+           age= demo$Group, age_raw= demo$Age, subID= demo$CCID)
+
+data4plot$algorithm= factor(data4plot$algorithm, levels = c('Vanilla', 'BIC'))
+data4plot$age= factor(data4plot$age, levels = c('young adult', 'adult', 'older adult'))
+
+
+ggplot(data4plot, aes(center_freq, color= algorithm, fill=algorithm, alpha=0.5)) +
+  geom_density(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  #geom_histogram(aes(y=..density.., color= group, fill=group), alpha= 0.5, bins = 20) +
+  labs(x = "center frequency (Hz)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1,3)]) + scale_color_manual(values=cbbPalette[c(1,3)]) 
+
+ggsave('~histogram_center_freq_algorithm.pdf', device = "pdf")
+
+ggplot(data4plot, aes(center_freq, color= algorithm, fill=algorithm, alpha=0.5)) +
+  geom_density(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  #geom_histogram(aes(y=..density.., color= group, fill=group), alpha= 0.5, bins = 20) +
+  labs(x = "center frequency (Hz)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1,3)]) + scale_color_manual(values=cbbPalette[c(1,3)]) + facet_wrap(~age)
+
+ggsave('~histogram_center_freq_algorithm_byagegroup.pdf', device = "pdf", width= 12)
+
+p <- ggplot(data4plot, aes(center_freq, color= algorithm, fill=algorithm, alpha=0.5)) +
+  #geom_density(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  geom_histogram(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  labs(x = "center frequency (Hz)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1,3)]) + scale_color_manual(values=cbbPalette[c(1,3)]) + facet_wrap(~age)
+
+ggsave('~histogram_center_freq_algorithm_byagegroup_count.pdf', device = "pdf", width= 12)
+
+tt= ggplot_build(p)$data[1]
+
+data4plotdiff=data.frame(y_val= c( tt[[1]]$y[1:20]-tt[[1]]$y[21:40], tt[[1]]$y[41:60]-tt[[1]]$y[61:80], tt[[1]]$y[81:100]-tt[[1]]$y[101:120]), age=rep(c('1.young', '2.adult', '3.older'),each=20), x_vals= tt[[1]]$x, xmin=tt[[1]]$xmin, xmax=tt[[1]]$xmax)
+
+
+ggplot(data4plotdiff, aes(x= x_vals,y=y_val, xmin= xmin, xmax=xmax, ymin=0, ymax=y_val, color= age, fill=age, alpha=0.5)) + geom_rect()+
+  labs(x = "center frequency (Hz)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1,2,3)]) + scale_color_manual(values=cbbPalette[c(1,2,3)]) + facet_wrap(~age)
+
+ggsave('~histogram_diff_between_groups_center_freq_algorithm_byagegroup_count.pdf', device = "pdf", width= 12)
+
+
+
+
+
+
+
+
+
+
+data4plot$center_freq= scale(data4plot$center_freq)
+data4plot$age_raw= scale(data4plot$age_raw)
+lm0=lm(center_freq ~1, data4plot)
+lm1=lm(center_freq ~age_raw, data4plot)
+lm2=lm(center_freq ~algorithm + age_raw, data4plot)
+lm3=lm(center_freq ~algorithm *age_raw, data4plot)
+
+anova(lm0,lm1,lm2,lm3)
+sjPlot::tab_model(lm1)
+sjPlot::tab_model(lm2)
+sjPlot::tab_model(lm3)
+data4plot= data4plot[!is.na(data4plot$center_freq),]
+bf = generalTestBF(center_freq ~algorithm *age_raw, data4plot, whichModels = "top")
+summary(bf)
+
+lm0=lme4::lmer(center_freq ~ (1 | subID), data4plot)
+lm1=lme4::lmer(center_freq ~(1 | subID)+ age_raw, data4plot)
+lm2=lme4::lmer(center_freq ~(1 | subID)+ algorithm + age_raw, data4plot)
+lm3=lme4::lmer(center_freq ~(1 | subID)+ algorithm *age_raw, data4plot)
+
+anova(lm0,lm1,lm2,lm3)
+sjPlot::tab_model(lm1)
+sjPlot::tab_model(lm2)
+sjPlot::tab_model(lm3)
+bf = generalTestBF(center_freq ~  algorithm *age_raw, data4plot, whichModels = "top")
+summary(bf)
+
+
+# amplitude
+
+data4plot=data.frame(amplitude=c(stack(peak_amp_Van)[,1], stack(peak_amp_BIC)[,1]), 
+           algorithm= rep(c('Vanilla', 'BIC'), each=606*888),
+           age= demo$Group, age_raw= demo$Age, subID= demo$CCID)
+
+data4plot$algorithm= factor(data4plot$algorithm, levels = c('Vanilla', 'BIC'))
+data4plot$age= factor(data4plot$age, levels = c('young adult', 'adult', 'older adult'))
+
+
+ggplot(data4plot, aes(amplitude, color= algorithm, fill=algorithm, alpha=0.5)) +
+  geom_density(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  #geom_histogram(aes(y=..density.., color= group, fill=group), alpha= 0.5, bins = 20) +
+  labs(x = "amplitude (a.u.)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1,3)]) + scale_color_manual(values=cbbPalette[c(1,3)]) 
+
+ggsave('~histogram_amplitude_algorithm.pdf', device = "pdf")
+
+ggplot(data4plot, aes(amplitude, color= algorithm, fill=algorithm, alpha=0.5)) +
+  #geom_density(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  geom_histogram(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  labs(x = "amplitude (a.u.)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1,3)]) + scale_color_manual(values=cbbPalette[c(1,3)]) 
+
+ggsave('~histogram_amplitude_algorithm_count.pdf', device = "pdf")
+
+ggplot(data4plot, aes(amplitude, color= algorithm, fill=algorithm, alpha=0.5)) +
+  geom_density(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  #geom_histogram(aes(y=..density.., color= group, fill=group), alpha= 0.5, bins = 20) +
+  labs(x = "amplitude (a.u.)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1,3)]) + scale_color_manual(values=cbbPalette[c(1,3)]) + facet_wrap(~age)
+
+ggsave('~histogram_amplitude_algorithm_byagegroup.pdf', device = "pdf", width= 12)
+
+ggplot(data4plot, aes(amplitude, color= algorithm, fill=algorithm, alpha=0.5)) +
+  #geom_density(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  geom_histogram(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  labs(x = "amplitude (a.u.)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1,3)]) + scale_color_manual(values=cbbPalette[c(1,3)]) + facet_wrap(~age)
+
+ggsave('~histogram_amplitude_algorithm_byagegroup_count.pdf', device = "pdf", width= 12)
+
+
+
+
+data4plot$amplitude= scale(data4plot$amplitude)
+data4plot$age_raw= scale(data4plot$age_raw)
+lm0=lm(amplitude ~1, data4plot)
+lm1=lm(amplitude ~age_raw, data4plot)
+lm2=lm(amplitude ~algorithm + age_raw, data4plot)
+lm3=lm(amplitude ~algorithm *age_raw, data4plot)
+
+anova(lm0,lm1,lm2,lm3)
+sjPlot::tab_model(lm1)
+sjPlot::tab_model(lm2)
+sjPlot::tab_model(lm3)
+#bf = regressionBF(MSE ~algorithm *age_raw, data4plot, whichModels = "top")
+#summary(bf)
+
+lm0=lme4::lmer(amplitude ~ (1 | subID), data4plot)
+lm1=lme4::lmer(amplitude ~(1 | subID)+ age_raw, data4plot)
+lm2=lme4::lmer(amplitude ~(1 | subID)+ algorithm + age_raw, data4plot)
+lm3=lme4::lmer(amplitude ~(1 | subID)+ algorithm *age_raw, data4plot)
+
+anova(lm0,lm1,lm2,lm3)
+sjPlot::tab_model(lm3)
+sjPlot::tab_model(lm2)
+
+
+# std
+data4plot=data.frame(bandwidth=c(stack(peak_std_Van)[,1], stack(peak_std_BIC)[,1]), 
+           algorithm= rep(c('Vanilla', 'BIC'), each=606*888),
+           age= demo$Group, age_raw= demo$Age, subID= demo$CCID)
+
+data4plot$algorithm= factor(data4plot$algorithm, levels = c('Vanilla', 'BIC'))
+data4plot$age= factor(data4plot$age, levels = c('young adult', 'adult', 'older adult'))
+
+
+ggplot(data4plot, aes(bandwidth, color= algorithm, fill=algorithm, alpha=0.5)) +
+  geom_density(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  #geom_histogram(aes(y=..density.., color= group, fill=group), alpha= 0.5, bins = 20) +
+  labs(x = "bandwidth (Hz)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1,3)]) + scale_color_manual(values=cbbPalette[c(1,3)]) 
+
+ggsave('~histogram_bandwidth_algorithm.pdf', device = "pdf")
+
+ggplot(data4plot, aes(bandwidth, color= algorithm, fill=algorithm, alpha=0.5)) +
+  #geom_density(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  geom_histogram(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  labs(x = "bandwidth (Hz)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1,3)]) + scale_color_manual(values=cbbPalette[c(1,3)]) 
+
+ggsave('~histogram_bandwidth_algorithm_count.pdf', device = "pdf")
+
+ggplot(data4plot, aes(bandwidth, color= algorithm, fill=algorithm, alpha=0.5)) +
+  geom_density(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  #geom_histogram(aes(y=..density.., color= group, fill=group), alpha= 0.5, bins = 20) +
+  labs(x = "bandwidth (Hz)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1,3)]) + scale_color_manual(values=cbbPalette[c(1,3)]) + facet_wrap(~age)
+
+ggsave('~histogram_bandwidth_algorithm_byagegroup.pdf', device = "pdf", width= 12)
+
+ggplot(data4plot, aes(bandwidth, color= algorithm, fill=algorithm, alpha=0.5)) +
+  #geom_density(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  geom_histogram(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  labs(x = "bandwidth (Hz)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1,3)]) + scale_color_manual(values=cbbPalette[c(1,3)]) + facet_wrap(~age)
+
+ggsave('~histogram_bandwidth_algorithm_byagegroup_count.pdf', device = "pdf", width= 12)
+
+
+data4plot$bandwidth= scale(data4plot$bandwidth)
+data4plot$age_raw= scale(data4plot$age_raw)
+lm0=lm(bandwidth ~1, data4plot)
+lm1=lm(bandwidth ~age_raw, data4plot)
+lm2=lm(bandwidth ~algorithm + age_raw, data4plot)
+lm3=lm(bandwidth ~algorithm *age_raw, data4plot)
+
+anova(lm0,lm1,lm2,lm3)
+sjPlot::tab_model(lm1)
+sjPlot::tab_model(lm2)
+sjPlot::tab_model(lm3)
+
+
+lm0=lme4::lmer(bandwidth ~ (1 | subID), data4plot)
+lm1=lme4::lmer(bandwidth ~(1 | subID)+ age_raw, data4plot)
+lm2=lme4::lmer(bandwidth ~(1 | subID)+ algorithm + age_raw, data4plot)
+lm3=lme4::lmer(bandwidth ~(1 | subID)+ algorithm *age_raw, data4plot)
+
+anova(lm0,lm1,lm2,lm3)
+sjPlot::tab_model(lm3)
+
+
+
+# Add a little strawberry (conservative)
+peak_cf_SB= read.csv('~Peak_center_freq_SB.csv', header = FALSE)
+peak_amp_SB= read.csv('~Amplitude_freq_SB.csv', header = FALSE)
+peak_std_SB= read.csv('~Std_freq_SB.csv', header = FALSE)
+
+data4plot=data.frame(center_freq=c(stack(peak_cf_Van)[,1], stack(peak_cf_SB)[,1], stack(peak_cf_BIC)[,1]), 
+           algorithm= rep(c('Vanilla', 'SB', 'BIC'), each=606*888),
+           age= demo$Group)
+
+data4plot$algorithm= factor(data4plot$algorithm, levels = c('Vanilla', 'SB', 'BIC'))
+data4plot$age= factor(data4plot$age, levels = c('young adult', 'adult', 'older adult'))
+
+
+ggplot(data4plot, aes(center_freq, color= algorithm, fill=algorithm, alpha=0.5)) +
+  geom_density(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  #geom_histogram(aes(y=..density.., color= group, fill=group), alpha= 0.5, bins = 20) +
+  labs(x = "center frequency (Hz)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(2,4,6)]) + scale_color_manual(values=cbbPalette[c(2,4,6)]) 
+
+ggsave('~histogram_center_freq_algorithm_with_conservative.pdf', device = "pdf")
+
+ggplot(data4plot, aes(center_freq, color= algorithm, fill=algorithm, alpha=0.5)) +
+  geom_density(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  #geom_histogram(aes(y=..density.., color= group, fill=group), alpha= 0.5, bins = 20) +
+  labs(x = "center frequency (Hz)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(2,4,6)]) + scale_color_manual(values=cbbPalette[c(2,4,6)]) + facet_wrap(~age)
+
+ggsave('~histogram_center_freq_algorithm_byagegroup_with_conservative.pdf', device = "pdf", width= 12)
+
+
+# amplitude
+
+data4plot=data.frame(amplitude=c(stack(peak_amp_Van)[,1], stack(peak_amp_SB)[,1], stack(peak_amp_BIC)[,1]), 
+           algorithm= rep(c('Vanilla','SB', 'BIC'), each=606*888),
+           age= demo$Group)
+
+data4plot$algorithm= factor(data4plot$algorithm, levels = c('Vanilla', 'SB','BIC'))
+data4plot$age= factor(data4plot$age, levels = c('young adult', 'adult', 'older adult'))
+
+
+ggplot(data4plot, aes(amplitude, color= algorithm, fill=algorithm, alpha=0.5)) +
+  geom_density(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  #geom_histogram(aes(y=..density.., color= group, fill=group), alpha= 0.5, bins = 20) +
+  labs(x = "amplitude (a.u.)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(2,4,6)]) + scale_color_manual(values=cbbPalette[c(2,4,6)]) 
+
+ggsave('~histogram_amplitude_algorithm_with_conservative.pdf', device = "pdf")
+
+ggplot(data4plot, aes(amplitude, color= algorithm, fill=algorithm, alpha=0.5)) +
+  geom_density(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  #geom_histogram(aes(y=..density.., color= group, fill=group), alpha= 0.5, bins = 20) +
+  labs(x = "amplitude (a.u.)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(2,4,6)]) + scale_color_manual(values=cbbPalette[c(2,4,6)]) + facet_wrap(~age)
+
+ggsave('~histogram_amplitude_algorithm_byagegroup_with_conservative.pdf', device = "pdf", width= 12)
+
+# std
+
+data4plot=data.frame(bandwidth=c(stack(peak_std_Van)[,1], stack(peak_std_SB)[,1],stack(peak_std_BIC)[,1]), 
+           algorithm= rep(c('Vanilla','SB', 'BIC'), each=606*888),
+           age= demo$Group)
+
+data4plot$algorithm= factor(data4plot$algorithm, levels = c('Vanilla','SB', 'BIC'))
+data4plot$age= factor(data4plot$age, levels = c('young adult', 'adult', 'older adult'))
+
+
+ggplot(data4plot, aes(bandwidth, color= algorithm, fill=algorithm, alpha=0.5)) +
+  geom_density(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  #geom_histogram(aes(y=..density.., color= group, fill=group), alpha= 0.5, bins = 20) +
+  labs(x = "bandwidth (Hz)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(2,4,6)]) + scale_color_manual(values=cbbPalette[c(2,4,6)]) 
+
+ggsave('~histogram_bandwidth_algorithm_with_conservative.pdf', device = "pdf")
+
+ggplot(data4plot, aes(bandwidth, color= algorithm, fill=algorithm, alpha=0.5)) +
+  geom_density(aes( color= algorithm, fill=algorithm), alpha= 0.5, bins = 20) +
+  #geom_histogram(aes(y=..density.., color= group, fill=group), alpha= 0.5, bins = 20) +
+  labs(x = "bandwidth (Hz)", y = "denstity")  + theme_classic() +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(2,4,6)]) + scale_color_manual(values=cbbPalette[c(2,4,6)]) + facet_wrap(~age)
+
+ggsave('~histogram_bandwidth_algorithm_byagegroup_with_conservative.pdf', device = "pdf", width= 12)
+
+```
+
+
+
+``` {r Simulated data plots}
+
+Simerror=read.csv('~Error_of_param_simulated.csv')
+
+data4plot=cbind(stack(Simerror[,1:5]), Simerror[,6])
+colnames(data4plot)[3]= 'algorithm'
+
+data4plot$algorithm= factor(data4plot$algorithm, levels = c('Van', 'BIC'))
+
+ggplot(data4plot, aes(ind, values, fill=algorithm)) + 
+  ggdist::stat_halfeye(adjust = .5, width = .5, .width = 0, justification = -.5, alpha=0.5, point_alpha=0) + 
+  geom_boxplot(width = .2, outlier.shape = NA, colour= '#888888') + ggpubr::theme_classic2() + scale_fill_manual(values=cbbPalette[1:2]) + ylab("parameter error") + coord_cartesian(ylim = c(-4, 0.75))
+
+ggsave('~boxplot_simulated_param,eter_error.pdf', width=10, height=5,device = "pdf")
+
+set.seed(1111)
+err= data4plot$values[data4plot$ind== 'err_ap_exp_van' & (data4plot$algorithm=='Van' | data4plot$algorithm=='BIC')]
+alg= data4plot$algorithm[data4plot$ind== 'err_ap_exp_van' & (data4plot$algorithm=='Van' | data4plot$algorithm=='BIC')]
+  
+RVAideMemoire::perm.t.test(err~ alg, nperm=1000, paired = FALSE)
+set.seed(2222)
+err= data4plot$values[data4plot$ind== 'err_ap_off_van' & (data4plot$algorithm=='Van' | data4plot$algorithm=='BIC')]
+alg= data4plot$algorithm[data4plot$ind== 'err_ap_off_van' & (data4plot$algorithm=='Van' | data4plot$algorithm=='BIC')]
+  
+RVAideMemoire::perm.t.test(err~ alg, nperm=1000, paired = FALSE)
+set.seed(3333)
+err= data4plot$values[data4plot$ind== 'err_pk_am_van' & (data4plot$algorithm=='Van' | data4plot$algorithm=='BIC')]
+alg= data4plot$algorithm[data4plot$ind== 'err_pk_am_van' & (data4plot$algorithm=='Van' | data4plot$algorithm=='BIC')]
+  
+RVAideMemoire::perm.t.test(err~ alg, nperm=1000, paired = FALSE)
+set.seed(4444)
+err= data4plot$values[data4plot$ind== 'err_pk_sd_van' & (data4plot$algorithm=='Van' | data4plot$algorithm=='BIC')]
+alg= data4plot$algorithm[data4plot$ind== 'err_pk_sd_van' & (data4plot$algorithm=='Van' | data4plot$algorithm=='BIC')]
+  
+RVAideMemoire::perm.t.test(err~ alg, nperm=1000, paired = FALSE)
+set.seed(55)
+err= data4plot$values[data4plot$ind== 'err_pk_cf_van' & (data4plot$algorithm=='Van' | data4plot$algorithm=='BIC')]
+alg= data4plot$algorithm[data4plot$ind== 'err_pk_cf_van' & (data4plot$algorithm=='Van' | data4plot$algorithm=='BIC')]
+  
+RVAideMemoire::perm.t.test(err~ alg, nperm=200, paired = FALSE)
+
+BIC= data4plot$values[data4plot$ind== 'err_pk_cf_van' & ( data4plot$algorithm=='BIC')]
+Van= data4plot$values[data4plot$ind== 'err_pk_cf_van' & (data4plot$algorithm=='Van')]
+RVAideMemoire::perm.t.test(BIC,Van, nperm=200, paired = FALSE)
+
+```
+
+
+
+```{r Plot example spectra fullband }
+
+cbbPalette <- c( '#808080',"#90319D","#E25987","#FFBF00","#3A3AA4", "#31CD71", "#F0792C", "#6C3ABF")
+
+cbbPalette= c("#4f89e0", "#f5ec6c",'#156605',"#76D7C4","#268236", '#4d3d87','#593d80', '#3b49e3')
+
+demo=read.csv('~CAMCAN_Analysis/standard_data.csv')
+demo2=read.csv('~fulldemo_fromCAMCAN_test.csv')
+demo$CCID=paste('sub',demo$CCID, sep = '_')
+ids=read.csv('~CAMCAN_Analysis/subject_codes.csv')
+index=demo$CCID %in% ids$Ids
+demo=demo[index,]
+
+demo$Group[demo$Age>=18 & demo$Age <45]= "young adult"
+demo$Group[demo$Age>=45 & demo$Age <65]= "adult"
+demo$Group[demo$Age>=65 & demo$Age <90]= "older adult"
+
+# read data and compute data for demographic table
+data=read.csv('~PSD_BIC.csv', header = FALSE)
+aperiodic_fit=read.csv('~aperiodic_BIC.csv', header = FALSE)
+periodic_fit=read.csv('~periodic_BIC.csv', header = FALSE)
+fpsd=read.csv('~fittedspectra_BIC.csv', header = FALSE)
+
+
+roi_index= (79*(56-1)+1):(79*(56-1)+79)
+
+PSD= data[525,roi_index]
+aperiodic= aperiodic_fit[525,roi_index]
+periodic= periodic_fit[525,roi_index]
+fooof= fpsd[525,roi_index]
+
+target_LSP= rbind( stack(PSD), stack(aperiodic), stack(fooof))
+target_LSP$Group = rep(c('PSD', 'aperiodic', 'specparam'), each=79)
+
+target_LSP$ind = plyr::mapvalues(target_LSP$ind , unique(target_LSP$ind ), seq(1,40,1/2))
+target_LSP$ind= as.numeric(as.character(target_LSP$ind))
+
+target_LSP$values= log10(target_LSP$values)
+
+ggplot(target_LSP, aes(x= ind, y = values, fill= Group, colour= Group)) +  geom_line() + theme_classic2() +  coord_cartesian(xlim = c(1, 40))
+
+ggsave('~Spectrum_participant_525_ROI_G_postcentral_BIC.pdf', device = "pdf", width=10, height=5, dpi=800)
+
+target_LSP= rbind( stack(periodic))
+target_LSP$Group = rep(c('periodic'), each=79)
+
+target_LSP$ind = plyr::mapvalues(target_LSP$ind , unique(target_LSP$ind ), seq(1,40,1/2))
+target_LSP$ind= as.numeric(as.character(target_LSP$ind))
+
+target_LSP$values= log10(target_LSP$values)
+
+ggplot(target_LSP, aes(x= ind, y = values, fill= Group, colour= Group)) +  geom_line() + theme_classic2() +  coord_cartesian(xlim = c(1, 40))
+
+ggsave('~Periodic_fit_participant_525_ROI_G_postcentral_BIC.pdf', device = "pdf", width=10, height=5, dpi=800)
+
+# plot another example 
+
+roi_index= (6*(56-1)+1):(6*(56-1)+6)
+
+peak_cf_BIC[565, roi_index]
+peak_amp_BIC[565, roi_index]
+peak_std_BIC[565, roi_index]
+
+G1= 0.4052557*exp((-1*((seq(1,40,1/2) - 27.10995)^2))/(2*(3.999932^2)))
+G2= 0.4158191*exp((-1*((seq(1,40,1/2) - 19.97928)^2))/(2*(3.999894^2)))
+
+
+roi_index= (79*(56-1)+1):(79*(56-1)+79)
+
+PSD= data[565,roi_index]
+aperiodic= aperiodic_fit[565,roi_index]
+periodic= periodic_fit[565,roi_index]
+fooof= fpsd[565,roi_index]
+
+plot(G1+G2)
+plot(log10(unlist(array(periodic[1,]))))
+
+target_LSP= rbind( stack(PSD), stack(aperiodic), stack(fooof))
+target_LSP$Group = rep(c('PSD', 'aperiodic', 'specparam'), each=79)
+
+target_LSP$ind = plyr::mapvalues(target_LSP$ind , unique(target_LSP$ind ), seq(1,40,1/2))
+target_LSP$ind= as.numeric(as.character(target_LSP$ind))
+
+target_LSP$values= log10(target_LSP$values)
+
+
+ggplot(target_LSP, aes(x= ind, y = values, fill= Group, colour= Group)) + geom_ribbon(data= target_LSP, aes(ymin = rep(log10(unlist(array(aperiodic[1,]))),3), ymax = rep(log10(unlist(array(aperiodic[1,])))+(G1+G2),3)), color = 'white',fill = "blue", alpha = .5) +  geom_line() + theme_classic2() +  coord_cartesian(xlim = c(1, 40)) 
+
+ggplot(target_LSP, aes(x= ind, y = values, fill= Group, colour= Group)) + geom_ribbon(data= target_LSP, aes(ymin = rep(log10(unlist(array(aperiodic[1,]))),3), ymax = rep(log10(unlist(array(aperiodic[1,])))+G1,3)), color = 'white',fill = "blue", alpha = .5) + geom_ribbon(data= target_LSP, aes(ymin = rep(log10(unlist(array(aperiodic[1,]))),3), ymax = rep(log10(unlist(array(aperiodic[1,])))+G2,3)), color = 'white',fill = "blue", alpha = .5) + geom_line() + theme_classic2() +  coord_cartesian(xlim = c(1, 40)) 
+
+ggsave('~Spectrum_participant_565_ROI_G_postcentral_BIC_NEW222.pdf', device = "pdf", width=10, height=5, dpi=800)
+
+
+roi_index= (79*(32-1)+1):(79*(32-1)+79)
+
+PSD= data[539,roi_index]
+aperiodic= aperiodic_fit[539,roi_index]
+periodic= periodic_fit[539,roi_index]
+
+target_LSP= rbind( stack(PSD), stack(aperiodic))
+target_LSP$Group = rep(c('PSD', 'aperiodic'), each=79)
+
+target_LSP$ind = plyr::mapvalues(target_LSP$ind , unique(target_LSP$ind ), seq(1,40,1/2))
+target_LSP$ind= as.numeric(as.character(target_LSP$ind))
+
+target_LSP$values= log10(target_LSP$values)
+
+ggplot(target_LSP, aes(x= ind, y = values, fill= Group, colour= Group)) +  geom_line() + theme_classic2() +  coord_cartesian(xlim = c(1, 40))
+
+ggsave('~Spectrum_participant_539_ROI_frontal_middlel_BIC.pdf', device = "pdf", width=10, height=5, dpi=800)
+
+
+
+data=read.csv('~PSD_Van.csv', header = FALSE)
+aperiodic_fit=read.csv('aperioidc_Van.csv', header = FALSE)
+periodic_fit=read.csv('~perioidc_Van.csv', header = FALSE)
+fit_psd=read.csv('~fittedspectra_Van.csv', header = FALSE)
+
+
+roi_index= (79*(56-1)+1):(79*(56-1)+79)
+
+PSD= data[525,roi_index]
+aperiodic= aperiodic_fit[525,roi_index]
+periodic= periodic_fit[525,roi_index]
+fooof= fit_psd[525,roi_index]
+
+target_LSP= rbind( stack(PSD), stack(aperiodic), stack(fooof))
+target_LSP$Group = rep(c('PSD', 'aperiodic', 'specparam'), each=79)
+
+target_LSP$ind = plyr::mapvalues(target_LSP$ind , unique(target_LSP$ind ), seq(1,40,1/2))
+target_LSP$ind= as.numeric(as.character(target_LSP$ind))
+
+target_LSP$values= log10(target_LSP$values)
+
+ggplot(target_LSP, aes(x= ind, y = values, fill= Group, colour= Group)) +  geom_line() + theme_classic2() +  coord_cartesian(xlim = c(1, 40))
+
+ggsave('~Spectrum_participant_525_ROI_G_postcentral_Van.pdf', device = "pdf", width=10, height=5, dpi=800)
+
+target_LSP= rbind( stack(periodic))
+target_LSP$Group = rep(c('periodic'), each=79)
+
+target_LSP$ind = plyr::mapvalues(target_LSP$ind , unique(target_LSP$ind ), seq(1,40,1/2))
+target_LSP$ind= as.numeric(as.character(target_LSP$ind))
+
+target_LSP$values= log10(target_LSP$values)
+
+ggplot(target_LSP, aes(x= ind, y = values, fill= Group, colour= Group)) +  geom_line() + theme_classic2() +  coord_cartesian(xlim = c(1, 40))
+
+ggsave('~Periodic_fit_participant_525_ROI_G postcentral_Van.pdf', device = "pdf", width=10, height=5, dpi=800)
+
+
+# plot another example 
+roi_index= (6*(56-1)+1):(6*(56-1)+6)
+
+peak_cf_Van[565, roi_index]
+peak_amp_Van[565, roi_index]
+peak_std_Van[565, roi_index]
+
+G1= 0.2118069*exp((-1*((seq(1,40,1/2) - 16.00524)^2))/(2*(1.229697^2)))
+G2= 0.2777129*exp((-1*((seq(1,40,1/2) - 18.70879)^2))/(2*(1.487294^2)))
+G3= 0.3406188*exp((-1*((seq(1,40,1/2) - 21.37124)^2))/(2*(1.374261^2)))
+G4= 0.5188783*exp((-1*((seq(1,40,1/2) - 25.2539)^2))/(2*(2.02724^2)))
+G5= 0.2152608*exp((-1*((seq(1,40,1/2) - 30.2154)^2))/(2*(1.68494^2)))
+
+roi_index= (79*(56-1)+1):(79*(56-1)+79)
+
+PSD= data[565,roi_index]
+aperiodic= aperiodic_fit[565,roi_index]
+periodic= periodic_fit[565,roi_index]
+fooof= fit_psd[565,roi_index]
+
+target_LSP= rbind( stack(PSD), stack(aperiodic), stack(fooof))
+target_LSP$Group = rep(c('PSD', 'aperiodic', 'specparam'), each=79)
+
+target_LSP$ind = plyr::mapvalues(target_LSP$ind , unique(target_LSP$ind ), seq(1,40,1/2))
+target_LSP$ind= as.numeric(as.character(target_LSP$ind))
+
+target_LSP$values= log10(target_LSP$values)
+
+ggplot(target_LSP, aes(x= ind, y = values, fill= Group, colour= Group)) + geom_ribbon(data= target_LSP, aes(ymin = rep(log10(unlist(array(aperiodic[1,]))),3), ymax = rep(log10(unlist(array(aperiodic[1,])))+(G1+G2+G3+G4+G5),3)), color = 'white',fill = "blue", alpha = .5)  + geom_line() + theme_classic2() +  coord_cartesian(xlim = c(1, 40)) 
+
+
+ggplot(target_LSP, aes(x= ind, y = values, fill= Group, colour= Group)) + geom_ribbon(data= target_LSP, aes(ymin = rep(log10(unlist(array(aperiodic[1,]))),3), ymax = rep(log10(unlist(array(aperiodic[1,])))+G1,3)), color = 'white',fill = "blue", alpha = .5) + geom_ribbon(data= target_LSP, aes(ymin = rep(log10(unlist(array(aperiodic[1,]))),3), ymax = rep(log10(unlist(array(aperiodic[1,])))+G2,3)), color = 'white',fill = "blue", alpha = .5) + geom_ribbon(data= target_LSP, aes(ymin = rep(log10(unlist(array(aperiodic[1,]))),3), ymax = rep(log10(unlist(array(aperiodic[1,])))+G3,3)), color = 'white',fill = "blue", alpha = .5)+ geom_ribbon(data= target_LSP, aes(ymin = rep(log10(unlist(array(aperiodic[1,]))),3), ymax = rep(log10(unlist(array(aperiodic[1,])))+G4,3)), color = 'white',fill = "blue", alpha = .5)+ geom_ribbon(data= target_LSP, aes(ymin = rep(log10(unlist(array(aperiodic[1,]))),3), ymax = rep(log10(unlist(array(aperiodic[1,])))+G5,3)), color = 'white',fill = "blue", alpha = .5) + geom_line() + theme_classic2() +  coord_cartesian(xlim = c(1, 40)) 
+
+
+ggsave('~Spectrum_participant_565_ROI_G_postcentral_Van_NEW222.pdf', device = "pdf", width=10, height=5, dpi=800)
+
+target_LSP= rbind( stack(periodic))
+target_LSP$Group = rep(c('periodic'), each=79)
+
+target_LSP$ind = plyr::mapvalues(target_LSP$ind , unique(target_LSP$ind ), seq(1,40,1/2))
+target_LSP$ind= as.numeric(as.character(target_LSP$ind))
+
+target_LSP$values= log10(target_LSP$values)
+
+ggplot(target_LSP, aes(x= ind, y = values, fill= Group, colour= Group)) +  geom_line() + theme_classic2() +  coord_cartesian(xlim = c(1, 40))
+
+ggsave('~Periodic_fit_participant_565_ROI_G_postcentral_Van.pdf', device = "pdf", width=10, height=5, dpi=800)
+
+
+
+# plot another example 
+
+roi_index= (79*(32-1)+1):(79*(32-1)+79)
+
+PSD= data[539,roi_index]
+aperiodic= aperiodic_fit[539,roi_index]
+periodic= periodic_fit[539,roi_index]
+
+target_LSP= rbind( stack(PSD), stack(aperiodic))
+target_LSP$Group = rep(c('PSD', 'aperiodic'), each=79)
+
+target_LSP$ind = plyr::mapvalues(target_LSP$ind , unique(target_LSP$ind ), seq(1,40,1/2))
+target_LSP$ind= as.numeric(as.character(target_LSP$ind))
+
+target_LSP$values= log10(target_LSP$values)
+
+ggplot(target_LSP, aes(x= ind, y = values, fill= Group, colour= Group)) +  geom_line() + theme_classic2() +  coord_cartesian(xlim = c(1, 40))
+
+ggsave('~Spectrum_participant_539_ROI_frontal_middle_Van.pdf', device = "pdf", width=10, height=5, dpi=800)
+
+target_LSP= rbind( stack(periodic))
+target_LSP$Group = rep(c('periodic'), each=79)
+
+target_LSP$ind = plyr::mapvalues(target_LSP$ind , unique(target_LSP$ind ), seq(1,40,1/2))
+target_LSP$ind= as.numeric(as.character(target_LSP$ind))
+
+target_LSP$values= log10(target_LSP$values)
+
+ggplot(target_LSP, aes(x= ind, y = values, fill= Group, colour= Group)) +  geom_line() + theme_classic2() +  coord_cartesian(xlim = c(1, 40))
+
+ggsave('~Periodic_fit_participant_539_ROI_frontal_middle_Van.pdf', device = "pdf", width=10, height=5, dpi=800)
+
+
+# plot another example 
+
+roi_index= (79*(32-1)+1):(79*(32-1)+79)
+
+PSD= data[483,roi_index]
+aperiodic= aperiodic_fit[483,roi_index]
+periodic= periodic_fit[483,roi_index]
+
+target_LSP= rbind( stack(PSD), stack(aperiodic))
+target_LSP$Group = rep(c('PSD', 'aperiodic'), each=79)
+
+target_LSP$ind = plyr::mapvalues(target_LSP$ind , unique(target_LSP$ind ), seq(1,40,1/2))
+target_LSP$ind= as.numeric(as.character(target_LSP$ind))
+
+target_LSP$values= log10(target_LSP$values)
+
+ggplot(target_LSP, aes(x= ind, y = values, fill= Group, colour= Group)) +  geom_line() + theme_classic2() +  coord_cartesian(xlim = c(1, 40))
+
+ggsave('~Spectrum_participant_483_ROI_frontal_middle_Van.pdf', device = "pdf", width=10, height=5, dpi=800)
+
+target_LSP= rbind( stack(periodic))
+target_LSP$Group = rep(c('periodic'), each=79)
+
+target_LSP$ind = plyr::mapvalues(target_LSP$ind , unique(target_LSP$ind ), seq(1,40,1/2))
+target_LSP$ind= as.numeric(as.character(target_LSP$ind))
+
+target_LSP$values= log10(target_LSP$values)
+
+ggplot(target_LSP, aes(x= ind, y = values, fill= Group, colour= Group)) +  geom_line() + theme_classic2() +  coord_cartesian(xlim = c(1, 40))
+
+ggsave('~Periodic_fit_participant_483_ROI_frontal_middle_Van.pdf', device = "pdf", width=10, height=5, dpi=800)
+
+
+```
+
