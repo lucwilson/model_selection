@@ -56,7 +56,7 @@ function [fs, fg] = ms_specparam(TF, Freqs, opt, hOT)
         flat_spec = flatten_spectrum(fs, spec(chan,:), aperiodic_pars, opt.aperiodic_mode);
         % estimate valid peaks (and determine max n)
         [est_pars, peak_function] = est_peaks(fs, flat_spec, opt.max_peaks, opt.peak_threshold, opt.min_peak_height, ...
-            opt.peak_width_limits/2, opt.proximity_threshold, opt.peak_type);
+            opt.peak_width_limits/2, opt.proximity_threshold, opt.border_threshold, opt.peak_type);
         model = struct();
         for pk = 0:size(est_pars,1)
             peak_pars = est_fit(est_pars(1:pk,:), fs, flat_spec, opt.peak_width_limits/2, opt.peak_type, opt.guess_weight,hOT);
@@ -68,8 +68,6 @@ function [fs, fg] = ms_specparam(TF, Freqs, opt, hOT)
             aperiodic_pars = simple_ap_fit(fs, aperiodic, opt.aperiodic_mode);
             guess = peak_pars;
             if ~isempty(guess)
-%                 lb = [guess(1:pk,1)-guess(1:pk,3)*2,zeros(size(guess(1:pk,2))),ones(size(guess(1:pk,3)))*opt.peak_width_limits(1)/2]';
-%                 ub = [guess(1:pk,1)+guess(1:pk,3)*2,inf(size(guess(1:pk,2))),ones(size(guess(1:pk,3)))*opt.peak_width_limits(2)/2]';
                 lb = [max([ones(size(guess(1:pk,:),1),1).*fs(1) guess(1:pk,1)-guess(1:pk,3)*2],[],2),zeros(size(guess(1:pk,2))),ones(size(guess(1:pk,3)))*opt.peak_width_limits(1)/2]';
                 ub = [min([ones(size(guess(1:pk,:),1),1).*fs(end) guess(1:pk,1)+guess(1:pk,3)*2],[],2),inf(size(guess(1:pk,2))),ones(size(guess(1:pk,3)))*opt.peak_width_limits(2)/2]';
 
@@ -383,7 +381,7 @@ spectrum_flat = power_spectrum - gen_aperiodic(freqs,robust_aperiodic_params,ape
 
 end
 
-function [guess_params,peak_function] = est_peaks(freqs, flat_iter, max_n_peaks, peak_threshold, min_peak_height, gauss_std_limits, proxThresh, peakType)
+function [guess_params,peak_function] = est_peaks(freqs, flat_iter, max_n_peaks, peak_threshold, min_peak_height, gauss_std_limits, proxThresh, bordThresh, peakType)
 %       Iteratively fit peaks to flattened spectrum.
 %
 %       Parameters
@@ -481,7 +479,7 @@ function [guess_params,peak_function] = est_peaks(freqs, flat_iter, max_n_peaks,
 
             % Check peaks based on edges, and on overlap
             % Drop any that violate requirements.
-            guess_params = drop_peak_cf(guess_params, proxThresh, [min(freqs) max(freqs)]);
+            guess_params = drop_peak_cf(guess_params, bordThresh, [min(freqs) max(freqs)]);
             guess_params = drop_peak_overlap(guess_params, proxThresh);
             
         case 'cauchy' % cauchy only
