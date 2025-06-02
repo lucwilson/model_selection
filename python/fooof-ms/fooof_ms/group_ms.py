@@ -18,7 +18,7 @@ from fooof.plts.fg import plot_fg
 from fooof.core.items import OBJ_DESC
 from fooof.core.info import get_indices
 from fooof.core.io import fpath, fname, load_jsonlines
-from fooof.core.utils import check_inds, dict_array_to_lst, dict_select_keys, dict_lst_to_array
+from fooof.core.utils import check_inds, dict_array_to_lst, dict_select_keys
 from fooof.core.errors import NoModelError
 from fooof.core.reports import save_report_fg
 from fooof.core.strings import gen_results_fg_str, _format
