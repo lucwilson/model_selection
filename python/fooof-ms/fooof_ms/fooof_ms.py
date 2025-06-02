@@ -3,7 +3,6 @@ FOOOF-MS: A FOOOF subclass for model selection using the Bayesian Information Cr
 """
 
 from collections import namedtuple
-import os
 import json
 import numpy as np
 from numpy.linalg import LinAlgError
@@ -11,9 +10,8 @@ from scipy.optimize import curve_fit
 from fooof import FOOOF
 from fooof.core.funcs import get_ap_func, gaussian_function
 from fooof.core.io import fpath, fname
-from fooof.core.modutils import copy_doc_func_to_method
 from fooof.core.strings import _format
-from fooof.core.utils import dict_array_to_lst, dict_select_keys, dict_lst_to_array
+from fooof.core.utils import dict_array_to_lst, dict_select_keys
 from fooof.sim.gen import gen_aperiodic, gen_periodic
 from fooof.utils.params import compute_gauss_std
 
