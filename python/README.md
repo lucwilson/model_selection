@@ -26,7 +26,7 @@ Usage
 
 `fooof-ms` can be loaded and used in your Python pipeline by downloading the fooof-ms folder, adding it to your system path in Python and importing it alongside FOOOF.
 
-    sys.path.append('path_to_fooof-ms')
+    sys.path.append('path_to/fooof-ms')
     from fooof import FOOOF
     from fooof_ms import FOOOF_MS
 
