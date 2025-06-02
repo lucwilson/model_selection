@@ -11,15 +11,15 @@ Dependencies
 
 Below are the required dependencies for FOOOF:
 
-- `numpy <https://github.com/numpy/numpy>`
-- `scipy <https://github.com/scipy/scipy>` >= 0.19
+- [`numpy`](https://github.com/numpy/numpy)
+- [`scipy`](https://github.com/scipy/scipy) >= 0.19
 
 There are also optional dependencies, which offer additional functionality:
 
-- `matplotlib <https://github.com/matplotlib/matplotlib>` for visualizing data and model fits
-- `tqdm <https://github.com/tqdm/tqdm>` for printing progress bars when fitting many models
-- `pandas <https://github.com/pandas-dev/pandas>` for exporting model fit results to dataframes
-- `pytest <https://github.com/pytest-dev/pytest>` to run the test suite locally.
+- [`matplotlib`](https://github.com/matplotlib/matplotlib) for visualizing data and model fits
+- [`tqdm`](https://github.com/tqdm/tqdm) for printing progress bars when fitting many models
+- [`pandas`](https://github.com/pandas-dev/pandas) for exporting model fit results to dataframes
+- [`pytest`](https://github.com/pytest-dev/pytest) to run the test suite locally.
 
 Usage
 -----
