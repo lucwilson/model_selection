@@ -1,42 +1,30 @@
-%% Initialize simulation/analysis parameters
-opt.freq_range          = [1 40];
-opt.peak_width_limits   = [1 12];
-opt.max_peaks           = 6;
-opt.min_peak_height     = 1 / 10; % convert from dB to B
-opt.aperiodic_mode      = 'fixed'; % 'knee'
-opt.peak_threshold      = 2;   % 2 std dev: parameter for interface simplification
-opt.border_threshold    = 1;   % 1 std dev: proximity to edge of spectrum, static in Python 
-opt.return_spectrum     = 0;   % SPM/FT: set to 1
-opt.power_line          = '-5'; % otherwise 50, 60 Hz
-opt.proximity_threshold = 0.75;
-opt.optim_obj           = 'negloglike'; % negloglike
-opt.peak_type           = 'gaussian'; % 'cauchy', for interface simplification
-opt.guess_weight        = 'none'; % otherwise 'weak' or 'strong'
-opt.thresh_after        = true;   % Only when guess weight > 'None'
-opt.hOT                 = 1; % 0 if no optimization toolbox
-% generate spectra (same spectra, different noise levels)
-rng(123);
-Freqs = 0.5:0.5:100;
-TF = zeros(4,1,200);
-ap = [-4.3 1.2];
-pp = [4 0.7 1.3; 11 0.9 2; 17 0.6 5];
-noise = randn(1,1,200);
-TF(1,1,:) = build_model(Freqs, ap, 'fixed', pp, @gaussian);
-for k = 1:3
-    TF(k+1,1,:) = TF(1,1,:)+noise*0.05.*k;
-end
-TF = 10.^TF; % function takes PSD measured in units of power
-
-[fs, fg] = ms_specparam(TF,Freqs, opt, 1);
-
-
-%% Main algorithm
 function [fs, fg] = ms_specparam(TF, Freqs, opt, hOT)
+% ms_specparam: Applies the model selection specparam algorithm on a Welch's PSD
+% Input:    
+%           - TF: n x t x f array of PSD values, measured in power
+%               where n = number of channels
+%                     t = number of time points (1 for PSD)
+%                     f = number of frequencies
+%           - Freqs: 1D Frequency vector
+%           - opt: Process options/hyperparameters (can be built using build_opt)
+%           - hOT: Whether the user has the optimization toolbox (fails when false)
+% 
+% Output:   
+%           - fs: 1D frequency vector of modelled spectra
+%           - fg: struct containing output from ms-specparam
+%
+% REFERENCE: Please cite the original specparam algorithm:
+%    Donoghue T, Haller M, Peterson E, Varma P, Sebastian P, Gao R, Noto T,
+%    Lara AH, Wallis JD, Knight RT, Shestyuk A, Voytek B. Parameterizing 
+%    neural power spectra into periodic and aperiodic components. 
+%    Nature Neuroscience (2020).
+
     % Find all frequency values within user limits
     fMask = (round(Freqs.*10)./10 >= opt.freq_range(1)) & (round(Freqs.*10)./10 <= opt.freq_range(2)) & ~mod(sum(abs(round(Freqs.*10)./10-[1;2;3].*str2double(opt.power_line)) >= 2),3);
     fs = Freqs(fMask);
     spec = log10(squeeze(TF(:,1,fMask))); % extract log spectra
     nChan = size(TF,1);
+    if ~hOT, error('Please ensure the Optimization Toolbox is installed.'); end
     if nChan == 1, spec = spec'; end
     % Initalize FOOOF structs
     fg(nChan) = struct(...
@@ -59,7 +47,7 @@ function [fs, fg] = ms_specparam(TF, Freqs, opt, hOT)
             opt.peak_width_limits/2, opt.proximity_threshold, opt.border_threshold, opt.peak_type);
         model = struct();
         for pk = 0:size(est_pars,1)
-            peak_pars = est_fit(est_pars(1:pk,:), fs, flat_spec, opt.peak_width_limits/2, opt.peak_type, opt.guess_weight,hOT);
+            peak_pars = est_fit(est_pars(1:pk,:), fs, flat_spec, opt.cf_bound, opt.peak_width_limits/2, opt.peak_type, opt.guess_weight,hOT);
             % Refit aperiodic
             aperiodic = spec(chan,:);
             for peak = 1:size(peak_pars,1)
@@ -68,8 +56,8 @@ function [fs, fg] = ms_specparam(TF, Freqs, opt, hOT)
             aperiodic_pars = simple_ap_fit(fs, aperiodic, opt.aperiodic_mode);
             guess = peak_pars;
             if ~isempty(guess)
-                lb = [max([ones(size(guess(1:pk,:),1),1).*fs(1) guess(1:pk,1)-guess(1:pk,3)*2],[],2),zeros(size(guess(1:pk,2))),ones(size(guess(1:pk,3)))*opt.peak_width_limits(1)/2]';
-                ub = [min([ones(size(guess(1:pk,:),1),1).*fs(end) guess(1:pk,1)+guess(1:pk,3)*2],[],2),inf(size(guess(1:pk,2))),ones(size(guess(1:pk,3)))*opt.peak_width_limits(2)/2]';
+                lb = [max([ones(size(guess(1:pk,:),1),1).*fs(1) guess(1:pk,1)-guess(1:pk,3)*opt.cf_bound],[],2),zeros(size(guess(1:pk,2))),ones(size(guess(1:pk,3)))*opt.peak_width_limits(1)/2]';
+                ub = [min([ones(size(guess(1:pk,:),1),1).*fs(end) guess(1:pk,1)+guess(1:pk,3)*opt.cf_bound],[],2),inf(size(guess(1:pk,2))),ones(size(guess(1:pk,3)))*opt.peak_width_limits(2)/2]';
 
             else
                 lb = [];
@@ -88,13 +76,13 @@ function [fs, fg] = ms_specparam(TF, Freqs, opt, hOT)
             end
             guess = guess(1:pk,:)';
             guess = [aperiodic_pars'; guess(:)];
-            options = optimset('Display', 'off', 'TolX', 1e-7, 'TolFun', 1e-9, ...
+            options = optimset('Display', 'off', 'TolX', 1e-9, 'TolFun', 1e-9, ...
                 'MaxFunEvals', 5000, 'MaxIter', 5000); % Tuned options 
             try
                 params = fmincon(@err_fm_constr,guess,[],[],[],[], ...
                     lb,ub,[],options,fs,spec(chan,:),opt.aperiodic_mode,opt.peak_type);
             catch
-                a = 0; % for catching errors
+                error(['Whole-model optimization failed on channel ' num2str(chan) ', model ' num2str(pk) '.']);
             end
             switch opt.aperiodic_mode
                 case 'fixed'
@@ -154,7 +142,6 @@ function [fs, fg] = ms_specparam(TF, Freqs, opt, hOT)
         fg(chan).AIC                = model(mi).AIC;
         fg(chan).BIC                = model(mi).BIC;
         fg(chan).models             = model;
-        %plot(fs', [fg(chan).ap_fit', fg(chan).peak_fit', fg(chan).fooofed_spectrum'])
     end
 end
 
@@ -294,8 +281,8 @@ function aperiodic_params = simple_ap_fit(freqs, power_spectrum, aperiodic_mode)
 %           Parameter estimates for aperiodic fit.
 
 %       Set guess params for lorentzian aperiodic fit, guess params set at init
-    options = optimset('Display', 'off', 'TolX', 1e-4, 'TolFun', 1e-6, ...
-        'MaxFunEvals', 10000, 'MaxIter', 10000);
+    options = optimset('Display', 'off', 'TolX', 1e-9, 'TolFun', 1e-9, ...
+        'MaxFunEvals', 5000, 'MaxIter', 5000);
 
     switch (aperiodic_mode)
         case 'fixed'  % no knee
@@ -345,8 +332,8 @@ function aperiodic_params = robust_ap_fit(freqs, power_spectrum, aperiodic_mode)
 
     % Second aperiodic fit - using results of first fit as guess parameters
 
-    options = optimset('Display', 'off', 'TolX', 1e-4, 'TolFun', 1e-6, ...
-        'MaxFunEvals', 10000, 'MaxIter', 10000);
+    options = optimset('Display', 'off', 'TolX', 1e-9, 'TolFun', 1e-9, ...
+        'MaxFunEvals', 5000, 'MaxIter', 5000);
     guess_vec = popt;
 
     switch (aperiodic_mode)
@@ -444,8 +431,8 @@ function [guess_params,peak_function] = est_peaks(freqs, flat_iter, max_n_peaks,
                 % Find half height index on each side of the center frequency.
                 half_height = 0.5 * max_height;
 
-                le_ind = sum(flat_iter(1:max_ind) <= half_height);
-                ri_ind = length(flat_iter) - sum(flat_iter(max_ind:end) <= half_height)+1;
+                le_ind = max_ind - find(flat_iter(max_ind-1:-1:1) <= half_height,1);
+                ri_ind = max_ind + find(flat_iter(max_ind+1:end) <= half_height,1);
 
                 % Keep bandwidth estimation from the shortest side.
                 % We grab shortest to avoid estimating very large std from overalapping peaks.
@@ -485,7 +472,6 @@ function [guess_params,peak_function] = est_peaks(freqs, flat_iter, max_n_peaks,
         case 'cauchy' % cauchy only
             peak_function = @cauchy; % Identify peaks as cauchy
             guess_params = zeros(max_n_peaks, 3);
-            flat_spec = flat_iter;
             for guess = 1:max_n_peaks
                 max_ind = find(flat_iter == max(flat_iter));
                 max_height = flat_iter(max_ind);
@@ -498,8 +484,8 @@ function [guess_params,peak_function] = est_peaks(freqs, flat_iter, max_n_peaks,
                     break
                 end
                 half_height = 0.5 * max_height;
-                le_ind = sum(flat_iter(1:max_ind) <= half_height);
-                ri_ind = length(flat_iter) - sum(flat_iter(max_ind:end) <= half_height);
+                le_ind = max_ind - find(flat_iter(max_ind-1:-1:1) <= half_height,1);
+                ri_ind = max_ind + find(flat_iter(max_ind+1:end) <= half_height,1);
                 short_side = min(abs([le_ind,ri_ind]-max_ind));
 
                 % Estimate gamma from FWHM. Calculate FWHM, converting to Hz, get guess gamma from FWHM
@@ -523,13 +509,13 @@ function [guess_params,peak_function] = est_peaks(freqs, flat_iter, max_n_peaks,
 
             end
             guess_params(guess_params(:,1) == 0,:) = [];
-            guess_params = drop_peak_cf(guess_params, proxThresh, [min(freqs) max(freqs)]);
+            guess_params = drop_peak_cf(guess_params, bordThresh, [min(freqs) max(freqs)]);
             guess_params = drop_peak_overlap(guess_params, proxThresh);
             
     end
 end
 
-function model_params = est_fit(guess_params, freqs, flat_spec, gauss_std_limits, peakType, guess_weight,hOT)
+function model_params = est_fit(guess_params, freqs, flat_spec, cf_bound, gauss_std_limits, peakType, guess_weight,hOT)
 %       Iteratively fit peaks to flattened spectrum.
 %
 %       Parameters
@@ -566,7 +552,7 @@ function model_params = est_fit(guess_params, freqs, flat_spec, gauss_std_limits
 
             % If there are peak guesses, fit the peaks, and sort results.
             if ~isempty(guess_params)
-                model_params = fit_peak_guess(guess_params, freqs, flat_spec, 1, guess_weight, gauss_std_limits,hOT);
+                model_params = fit_peak_guess(guess_params, freqs, flat_spec, 1, guess_weight, cf_bound, gauss_std_limits,hOT);
             else
                 model_params = [];
             end
@@ -575,7 +561,7 @@ function model_params = est_fit(guess_params, freqs, flat_spec, gauss_std_limits
 
            % If there are peak guesses, fit the peaks, and sort results.
             if ~isempty(guess_params)
-                model_params = fit_peak_guess(guess_params, freqs, flat_spec, 2, guess_weight, gauss_std_limits,hOT);
+                model_params = fit_peak_guess(guess_params, freqs, flat_spec, 2, guess_weight, cf_bound, gauss_std_limits,hOT);
             else
                 model_params = [];
             end
@@ -661,7 +647,7 @@ function guess = drop_peak_overlap(guess, proxThresh)
     guess = sortrows(guess,2,'descend');
 end
 
-function peak_params = fit_peak_guess(guess, freqs, flat_spec, peak_type, guess_weight, std_limits, hOT)
+function peak_params = fit_peak_guess(guess, freqs, flat_spec, peak_type, guess_weight, cf_bound, std_limits, hOT)
 %     Fits a group of peak guesses with a fit function.
 %
 %     Parameters
@@ -689,14 +675,14 @@ function peak_params = fit_peak_guess(guess, freqs, flat_spec, peak_type, guess_
 
     
     if hOT % Use OptimToolbox for fmincon
-        lb = [max([ones(size(guess,1),1).*freqs(1) guess(:,1)-guess(:,3)*2],[],2),zeros(size(guess(:,2))),ones(size(guess(:,3)))*std_limits(1)];
-        ub = [min([ones(size(guess,1),1).*freqs(end) guess(:,1)+guess(:,3)*2],[],2),inf(size(guess(:,2))),ones(size(guess(:,3)))*std_limits(2)];
-        options = optimset('Display', 'off', 'TolX', 1e-3, 'TolFun', 1e-5, ...
+        lb = [max([ones(size(guess,1),1).*freqs(1) guess(:,1)-guess(:,3)*cf_bound],[],2),zeros(size(guess(:,2))),ones(size(guess(:,3)))*std_limits(1)];
+        ub = [min([ones(size(guess,1),1).*freqs(end) guess(:,1)+guess(:,3)*cf_bound],[],2),inf(size(guess(:,2))),ones(size(guess(:,3)))*std_limits(2)];
+        options = optimset('Display', 'off', 'TolX', 1e-9, 'TolFun', 1e-9, ...
             'MaxFunEvals', 5000, 'MaxIter', 5000); % Tuned options       
         peak_params = fmincon(@error_model_constr,guess,[],[],[],[], ...
             lb,ub,[],options,freqs,flat_spec, peak_type);
     else % Use basic simplex approach, fminsearch, with guess_weight
-        options = optimset('Display', 'off', 'TolX', 1e-5, 'TolFun', 1e-7, ...
+        options = optimset('Display', 'off', 'TolX', 1e-9, 'TolFun', 1e-9, ...
         'MaxFunEvals', 5000, 'MaxIter', 5000);
         peak_params = fminsearch(@error_model,...
             guess, options, freqs, flat_spec, peak_type, guess, guess_weight);
