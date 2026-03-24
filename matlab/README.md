@@ -23,7 +23,7 @@ For a worked example, see the tutorial.
 Tutorial
 --------
 
-A full demonstration of `ms-specparam`, contrasted against `specparam`, can be found in the tutorial folder.
+A full demonstration of `ms-specparam`, contrasted against `specparam`, can be found in the tutorial folder as a MATLAB script.
 
 Additional Resources
 --------------------
